@@ -42,9 +42,9 @@ class GnomeModule:
     def __print_gresources_warning(self, state):
         global gresource_warning_printed
         if not gresource_warning_printed:
-            if mesonlib.version_compare(self.get_native_glib_version(state), '< 2.50.0'):
+            if mesonlib.version_compare(self.get_native_glib_version(state), '< 2.50.2'):
                 mlog.log('Warning, GLib compiled dependencies do not work fully '
-                         'with versions of GLib older than 2.50.0.\n'
+                         'with versions of GLib older than 2.50.2.\n'
                          'See the following upstream issue:',
                          mlog.bold('https://bugzilla.gnome.org/show_bug.cgi?id=745754'))
             gresource_warning_printed = True
@@ -69,8 +69,8 @@ class GnomeModule:
         if not isinstance(dependencies, list):
             dependencies = [dependencies]
 
-        if mesonlib.version_compare(self.get_native_glib_version(state),
-                                    '< 2.48.2'):
+        glib_version = self.get_native_glib_version(state)
+        if mesonlib.version_compare(glib_version, '< 2.48.2'):
             if len(dependencies) > 0:
                 raise MesonException(
                   'The "dependencies" argument of gnome.compile_resources() '
@@ -86,7 +86,7 @@ class GnomeModule:
         else:
             raise RuntimeError('Unreachable code.')
 
-        kwargs['depend_files'] = self.get_gresource_dependencies(
+        depend_files = self.get_gresource_dependencies(
             state, ifile, source_dirs, dependencies)
 
         for source_dir in source_dirs:
@@ -108,9 +108,24 @@ class GnomeModule:
         kwargs['command'] = cmd
         kwargs['input'] = args[1]
         kwargs['output'] = args[0] + '.c'
+        depfile = kwargs['output'] + '.d'
+        if mesonlib.version_compare(glib_version, '< 2.50.2'):
+            kwargs['depend_files'] = depend_files
+        else:
+            depfile = kwargs['output'] + '.d'
+            kwargs['depfile'] = depfile
         target_c = build.CustomTarget(args[0] + '_c', state.subdir, kwargs)
-        kwargs['output'] = args[0] + '.h'
-        target_h = build.CustomTarget(args[0] + '_h', state.subdir, kwargs)
+        # TODO: This is pretty ugly and surely backend specific (ninja)
+        target_output = os.path.join(state.environment.get_build_dir(), state.subdir, target_c.get_id(), depfile)
+        target_c.command.append('--dependency-file=' + target_output)
+
+        print(target_c.command)
+        h_kwargs = {
+            'command': cmd,
+            'input': args[1],
+            'output': args[0] + '.h',
+        }
+        target_h = build.CustomTarget(args[0] + '_h', state.subdir, h_kwargs)
         return [target_c, target_h]
 
     def get_gresource_dependencies(self, state, input_file, source_dirs, dependencies):
